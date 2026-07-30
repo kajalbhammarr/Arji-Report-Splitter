@@ -353,7 +353,7 @@ COL_WIDTHS = {
     "Meet To": 20,
     "Visitor Name": 25,
     "Visitor Mobile No": 18,
-    "Arji No": 12,
+    "Arji No": 20,
     "Visit Purpose": 30,
     "VisitDateTime": 20,
     "Details of Actions Taken (कार्यवाही का विवरण)": 45,
@@ -617,7 +617,7 @@ def build_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str, all_mode: bool = 
     ALL names selected: 2 files only (All-Pending / All-Completed).
     Excel and PDF always share the same base name, e.g.
     CP-Sir-Completed_30-07-2026_12-10-05.xlsx / .pdf
-    (v2: mobile numbers zero-padded to 10 digits)"""
+    (v3: mobile zero-padding, wider Arji No column)"""
     if all_mode:
         zip_items = [
             ("All-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_OTHER),
