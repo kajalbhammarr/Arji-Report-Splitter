@@ -611,32 +611,40 @@ def make_pdf(title: str, data: pd.DataFrame, cols: list) -> bytes:
 # Fixed file label: whoever is selected, their sheets are named "CP-Sir"
 safe_cp = "CP-Sir"
 
-@st.cache_data(show_spinner=False, max_entries=5)
-def build_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str, all_mode: bool = False) -> bytes:
-    """Build the ZIP. Some names selected: 4 files (CP-Sir + Other).
-    ALL names selected: 2 files only (All-Pending / All-Completed).
-    Excel and PDF always share the same base name, e.g.
-    CP-Sir-Completed_30-07-2026_12-10-05.xlsx / .pdf
-    (v3: mobile zero-padding, wider Arji No column)"""
+def _zip_items(cp_p, cp_c, ot_p, ot_c, label_key: str, all_mode: bool):
+    """Some names selected: 4 files (CP-Sir + Other).
+    ALL names selected: 2 files only (All-Pending / All-Completed)."""
     if all_mode:
-        zip_items = [
+        return [
             ("All-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_OTHER),
             ("All-Completed", TITLE_COMPLETED, cp_c, OUTPUT_COLS_OTHER),
         ]
-    else:
-        zip_items = [
-            (f"{label_key}-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_SELECTED),
-            (f"{label_key}-Completed", TITLE_COMPLETED, cp_c, OUTPUT_COLS_SELECTED),
-            ("Other-Pending", TITLE_PENDING, ot_p, OUTPUT_COLS_OTHER),
-            ("Other-Completed", TITLE_COMPLETED, ot_c, OUTPUT_COLS_OTHER),
-        ]
+    return [
+        (f"{label_key}-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_SELECTED),
+        (f"{label_key}-Completed", TITLE_COMPLETED, cp_c, OUTPUT_COLS_SELECTED),
+        ("Other-Pending", TITLE_PENDING, ot_p, OUTPUT_COLS_OTHER),
+        ("Other-Completed", TITLE_COMPLETED, ot_c, OUTPUT_COLS_OTHER),
+    ]
+
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def build_excel_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str, all_mode: bool = False) -> bytes:
+    """ZIP containing only the Excel files, e.g. CP-Sir-Completed_30-07-2026_12-10-05.xlsx
+    (v3: mobile zero-padding, wider Arji No column)"""
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, title, data, cols in zip_items:
-            base = f"{name}_{ts}"
-            zf.writestr(f"Excel/{base}.xlsx", to_excel_bytes({name[:31]: (title, data, cols)}))
-            if HAS_FPDF:
-                zf.writestr(f"PDF/{base}.pdf", make_pdf(title, data, cols))
+        for name, title, data, cols in _zip_items(cp_p, cp_c, ot_p, ot_c, label_key, all_mode):
+            zf.writestr(f"{name}_{ts}.xlsx", to_excel_bytes({name[:31]: (title, data, cols)}))
+    return zip_buf.getvalue()
+
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def build_pdf_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str, all_mode: bool = False) -> bytes:
+    """ZIP containing only the PDF files, e.g. CP-Sir-Completed_30-07-2026_12-10-05.pdf"""
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, title, data, cols in _zip_items(cp_p, cp_c, ot_p, ot_c, label_key, all_mode):
+            zf.writestr(f"{name}_{ts}.pdf", make_pdf(title, data, cols))
     return zip_buf.getvalue()
 
 
@@ -644,7 +652,7 @@ st.subheader("Download")
 
 if not HAS_FPDF:
     st.warning(
-        "PDF library not installed — ZIP will contain only the 4 Excel files. "
+        "PDF library not installed — only the Excel ZIP will be available. "
         "Run: pip install fpdf2 uharfbuzz"
     )
 elif not _pdf_font()[0]:
@@ -655,37 +663,50 @@ elif not _pdf_font()[0]:
 
 # ALL names selected -> only 2 files (All-Pending / All-Completed); else 4 files.
 all_selected = len(selected_names) == len(meet_to_values)
-files_desc = "2 Excel + 2 PDF" if all_selected else "4 Excel + 4 PDF"
+n_files = 2 if all_selected else 4
+files_desc = f"{n_files} Excel + {n_files} PDF" if HAS_FPDF else f"{n_files} Excel"
 
 # Files are built only when Generate is clicked — name selection stays instant.
 sel_key = hashlib.md5(file_bytes).hexdigest() + "|" + "|".join(sorted(selected_names))
 
 if st.session_state.get("zip_key") == sel_key:
-    st.download_button(
-        f"⬇️ Download {st.session_state['zip_name']} ({files_desc})",
-        data=st.session_state["zip_data"],
-        file_name=st.session_state["zip_name"],
-        mime="application/zip",
-        type="primary",
-    )
+    dl_xl, dl_pdf = st.columns(2)
+    with dl_xl:
+        st.download_button(
+            f"⬇️ Download All Excel ZIP ({n_files} files)",
+            data=st.session_state["zip_excel_data"],
+            file_name=st.session_state["zip_excel_name"],
+            mime="application/zip",
+            type="primary",
+        )
+    with dl_pdf:
+        if st.session_state.get("zip_pdf_data"):
+            st.download_button(
+                f"⬇️ Download All PDF ZIP ({n_files} files)",
+                data=st.session_state["zip_pdf_data"],
+                file_name=st.session_state["zip_pdf_name"],
+                mime="application/zip",
+                type="primary",
+            )
     st.caption("Changing the name selection will need a new Generate.")
 else:
     if st.button(f"🔄 Generate files ({files_desc})", type="primary"):
-        with st.spinner(f"Preparing ZIP ({files_desc})..."):
+        with st.spinner(f"Preparing ZIPs ({files_desc})..."):
             ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
             if all_selected:
                 # Everyone included — use the full file so no row is left out
-                st.session_state["zip_data"] = build_zip(
-                    df[is_pending], df[~is_pending], None, None, safe_cp, ts, True
-                )
+                zip_args = (df[is_pending], df[~is_pending], None, None, safe_cp, ts, True)
             else:
-                st.session_state["zip_data"] = build_zip(
-                    cp_pending, cp_completed, other_pending, other_completed, safe_cp, ts
+                zip_args = (
+                    cp_pending, cp_completed, other_pending, other_completed, safe_cp, ts,
                 )
+            st.session_state["zip_excel_data"] = build_excel_zip(*zip_args)
+            st.session_state["zip_excel_name"] = f"VMS-Excel-{ts}.zip"
+            st.session_state["zip_pdf_data"] = build_pdf_zip(*zip_args) if HAS_FPDF else None
+            st.session_state["zip_pdf_name"] = f"VMS-PDF-{ts}.zip"
             st.session_state["zip_key"] = sel_key
-            st.session_state["zip_name"] = f"VMS-{ts}.zip"
         st.rerun()
-    st.caption("Choose names above, then click **Generate files** to prepare the ZIP.")
+    st.caption("Choose names above, then click **Generate files** to prepare the ZIPs.")
 
 # ---------- Preview (hidden — click to open) ----------
 with st.expander("👁 Preview sheets — click to view data", expanded=False):
