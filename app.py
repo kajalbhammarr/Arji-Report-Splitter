@@ -363,6 +363,19 @@ TITLE_PENDING = "Visitor Details(Pending)"
 TITLE_COMPLETED = "Visitor Details(Completed)"
 
 
+def _fix_mobile(v) -> str:
+    """Mobile numbers are stored as numbers in the source Excel, so leading
+    zeros disappear (0000000000 -> 0). Restore 10-digit zero-padding."""
+    if pd.isna(v):
+        return ""
+    s = str(v).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    if s.isdigit() and len(s) < 10:
+        s = s.zfill(10)
+    return s
+
+
 def format_output(data: pd.DataFrame, cols: list) -> pd.DataFrame:
     """Keep only the given output columns, renumber Sr.No. from 1."""
     out = pd.DataFrame()
@@ -370,7 +383,10 @@ def format_output(data: pd.DataFrame, cols: list) -> pd.DataFrame:
         if col == "Sr.No.":
             out[col] = range(1, len(data) + 1)
         elif col in data.columns:
-            out[col] = data[col].values
+            if col == "Visitor Mobile No":
+                out[col] = [_fix_mobile(v) for v in data[col].values]
+            else:
+                out[col] = data[col].values
         else:
             out[col] = ""
     return out
@@ -600,7 +616,8 @@ def build_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str, all_mode: bool = 
     """Build the ZIP. Some names selected: 4 files (CP-Sir + Other).
     ALL names selected: 2 files only (All-Pending / All-Completed).
     Excel and PDF always share the same base name, e.g.
-    CP-Sir-Completed_30-07-2026_12-10-05.xlsx / .pdf"""
+    CP-Sir-Completed_30-07-2026_12-10-05.xlsx / .pdf
+    (v2: mobile numbers zero-padded to 10 digits)"""
     if all_mode:
         zip_items = [
             ("All-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_OTHER),
