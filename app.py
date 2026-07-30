@@ -2,7 +2,6 @@ import hashlib
 import io
 import logging
 import os
-import re
 import sys
 import threading
 import zipfile
@@ -593,11 +592,8 @@ def make_pdf(title: str, data: pd.DataFrame, cols: list) -> bytes:
     return result["pdf"]
 
 
-# File label: "CP Sir" -> "CP-Sir"; multiple names -> "Selected-3-names"
-if len(selected_names) == 1:
-    safe_cp = re.sub(r"[^0-9A-Za-z]+", "-", str(selected_names[0])).strip("-") or "Selected"
-else:
-    safe_cp = f"Selected-{len(selected_names)}-names"
+# Fixed file label: whoever is selected, their sheets are named "CP-Sir"
+safe_cp = "CP-Sir"
 
 @st.cache_data(show_spinner=False, max_entries=5)
 def build_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str) -> bytes:
