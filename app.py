@@ -596,15 +596,23 @@ def make_pdf(title: str, data: pd.DataFrame, cols: list) -> bytes:
 safe_cp = "CP-Sir"
 
 @st.cache_data(show_spinner=False, max_entries=5)
-def build_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str) -> bytes:
-    """Build the ZIP (4 Excel + 4 PDF). Excel and PDF share the same base name,
-    e.g. CP-Sir-Completed_30-07-2026_12-10-05.xlsx / .pdf"""
-    zip_items = [
-        (f"{label_key}-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_SELECTED),
-        (f"{label_key}-Completed", TITLE_COMPLETED, cp_c, OUTPUT_COLS_SELECTED),
-        ("Other-Pending", TITLE_PENDING, ot_p, OUTPUT_COLS_OTHER),
-        ("Other-Completed", TITLE_COMPLETED, ot_c, OUTPUT_COLS_OTHER),
-    ]
+def build_zip(cp_p, cp_c, ot_p, ot_c, label_key: str, ts: str, all_mode: bool = False) -> bytes:
+    """Build the ZIP. Some names selected: 4 files (CP-Sir + Other).
+    ALL names selected: 2 files only (All-Pending / All-Completed).
+    Excel and PDF always share the same base name, e.g.
+    CP-Sir-Completed_30-07-2026_12-10-05.xlsx / .pdf"""
+    if all_mode:
+        zip_items = [
+            ("All-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_OTHER),
+            ("All-Completed", TITLE_COMPLETED, cp_c, OUTPUT_COLS_OTHER),
+        ]
+    else:
+        zip_items = [
+            (f"{label_key}-Pending", TITLE_PENDING, cp_p, OUTPUT_COLS_SELECTED),
+            (f"{label_key}-Completed", TITLE_COMPLETED, cp_c, OUTPUT_COLS_SELECTED),
+            ("Other-Pending", TITLE_PENDING, ot_p, OUTPUT_COLS_OTHER),
+            ("Other-Completed", TITLE_COMPLETED, ot_c, OUTPUT_COLS_OTHER),
+        ]
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for name, title, data, cols in zip_items:
@@ -628,12 +636,16 @@ elif not _pdf_font()[0]:
         "Deploy the app together with its `fonts/` folder (Mukta-Regular.ttf, Mukta-Bold.ttf)."
     )
 
+# ALL names selected -> only 2 files (All-Pending / All-Completed); else 4 files.
+all_selected = len(selected_names) == len(meet_to_values)
+files_desc = "2 Excel + 2 PDF" if all_selected else "4 Excel + 4 PDF"
+
 # Files are built only when Generate is clicked — name selection stays instant.
 sel_key = hashlib.md5(file_bytes).hexdigest() + "|" + "|".join(sorted(selected_names))
 
 if st.session_state.get("zip_key") == sel_key:
     st.download_button(
-        f"⬇️ Download {st.session_state['zip_name']} (4 Excel + 4 PDF)",
+        f"⬇️ Download {st.session_state['zip_name']} ({files_desc})",
         data=st.session_state["zip_data"],
         file_name=st.session_state["zip_name"],
         mime="application/zip",
@@ -641,12 +653,18 @@ if st.session_state.get("zip_key") == sel_key:
     )
     st.caption("Changing the name selection will need a new Generate.")
 else:
-    if st.button("🔄 Generate files (4 Excel + 4 PDF)", type="primary"):
-        with st.spinner("Preparing ZIP (4 Excel + 4 PDF)..."):
+    if st.button(f"🔄 Generate files ({files_desc})", type="primary"):
+        with st.spinner(f"Preparing ZIP ({files_desc})..."):
             ts = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-            st.session_state["zip_data"] = build_zip(
-                cp_pending, cp_completed, other_pending, other_completed, safe_cp, ts
-            )
+            if all_selected:
+                # Everyone included — use the full file so no row is left out
+                st.session_state["zip_data"] = build_zip(
+                    df[is_pending], df[~is_pending], None, None, safe_cp, ts, True
+                )
+            else:
+                st.session_state["zip_data"] = build_zip(
+                    cp_pending, cp_completed, other_pending, other_completed, safe_cp, ts
+                )
             st.session_state["zip_key"] = sel_key
             st.session_state["zip_name"] = f"VMS-{ts}.zip"
         st.rerun()
