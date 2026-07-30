@@ -425,16 +425,26 @@ def to_excel_bytes(sheet_dict: dict) -> bytes:
 
 
 def _pdf_font():
-    """Find a Devanagari-capable TTF font on Windows (for Hindi text in PDFs)."""
+    """Find a Devanagari-capable TTF font (regular, bold) for Hindi text in PDFs.
+    Bundled Mukta first — works on any server (incl. Streamlit Cloud/Linux) —
+    then Windows system fonts, then common Linux paths."""
+    here = os.path.dirname(os.path.abspath(__file__))
     candidates = [
-        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Fonts\Nirmala.ttf"),
-        r"C:\Windows\Fonts\Nirmala.ttf",
-        r"C:\Windows\Fonts\mangal.ttf",
+        (
+            os.path.join(here, "fonts", "Mukta-Regular.ttf"),
+            os.path.join(here, "fonts", "Mukta-Bold.ttf"),
+        ),
+        (os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Fonts\Nirmala.ttf"), None),
+        (r"C:\Windows\Fonts\Nirmala.ttf", None),
+        (r"C:\Windows\Fonts\mangal.ttf", None),
+        ("/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf", None),
     ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return None
+    for regular, bold in candidates:
+        if os.path.exists(regular):
+            if not (bold and os.path.exists(bold)):
+                bold = regular
+            return regular, bold
+    return None, None
 
 
 def _cell_text(v) -> str:
@@ -482,21 +492,30 @@ def to_pdf_bytes(
     pdf.set_auto_page_break(auto=True, margin=8)
     pdf.add_page()
 
-    font_path = _pdf_font()
-    if font_path:
-        pdf.add_font("Uni", "", font_path)
-        pdf.add_font("Uni", "B", font_path)
+    font_regular, font_bold = _pdf_font()
+    if font_regular:
+        pdf.add_font("Uni", "", font_regular)
+        pdf.add_font("Uni", "B", font_bold)
         font = "Uni"
+        sanitize = False
         if shaping:
             try:
                 pdf.set_text_shaping(True)  # correct Hindi matra/conjunct rendering
             except Exception:
                 pass
     else:
+        # No Unicode font available — helvetica can't encode Hindi, so replace
+        # unsupported characters with '?' instead of crashing.
         font = "helvetica"
+        sanitize = True
+
+    def _safe(text: str) -> str:
+        if sanitize:
+            return text.encode("latin-1", "replace").decode("latin-1")
+        return text
 
     pdf.set_font(font, "B", 16)
-    pdf.cell(0, 10, title, align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, _safe(title), align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
     pdf.set_font(font, "", 8)
@@ -517,11 +536,11 @@ def to_pdf_bytes(
     ) as table:
         hrow = table.row()
         for c in cols:
-            hrow.cell(c)
+            hrow.cell(_safe(c))
         for _, r in out.iterrows():
             row = table.row()
             for c in cols:
-                row.cell(_fit_text(_cell_text(r[c]), col_chars[c], max_lines))
+                row.cell(_safe(_fit_text(_cell_text(r[c]), col_chars[c], max_lines)))
     return bytes(pdf.output())
 
 
@@ -606,6 +625,11 @@ if not HAS_FPDF:
     st.warning(
         "PDF library not installed — ZIP will contain only the 4 Excel files. "
         "Run: pip install fpdf2 uharfbuzz"
+    )
+elif not _pdf_font()[0]:
+    st.warning(
+        "Hindi font not found on this server — PDFs will show '?' for Hindi text. "
+        "Deploy the app together with its `fonts/` folder (Mukta-Regular.ttf, Mukta-Bold.ttf)."
     )
 
 # Files are built only when Generate is clicked — name selection stays instant.
